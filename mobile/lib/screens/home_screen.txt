@@ -1,0 +1,1020 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as latlong;
+import '../services/api_service.dart';
+
+class HomeScreen extends StatefulWidget {
+  final VoidCallback? onLogout;
+
+  const HomeScreen({super.key, this.onLogout});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
+  List parqueaderos = [];
+  bool loading = true;
+  Map<String, dynamic>? selectedParqueadero;
+
+  late AnimationController _cardAnimationController;
+  late Animation<Offset> _cardOffsetAnimation;
+
+  // 🎨 Paleta moderna sobria azul
+  static const Color primaryColor = Color(0xFF1E3A8A); // Azul profundo elegante
+  static const Color secondaryColor = Color(0xFF2563EB); // Azul brillante
+  static const Color accentColor = Color(0xFF38BDF8); // Celeste moderno
+  static const Color backgroundColor = Color(0xFFF9FAFB); // Fondo gris azulado claro
+  static const Color textColor = Color(0xFF1E293B); // Gris azulado oscuro
+
+  List<Map<String, dynamic>> tarifas = [];
+  bool loadingTarifas = false;
+
+  // Estado de reserva activa
+  Map<String, dynamic>? reservaActiva;
+  int tiempoRestanteReserva = 0;
+  bool mostrandoAlerta5Min = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadParqueaderos();
+    _checkReservaActiva();
+
+    _cardAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _cardOffsetAnimation = Tween<Offset>(
+      begin: const Offset(0.0, 1.0),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _cardAnimationController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _cardAnimationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadParqueaderos() async {
+    setState(() {
+      loading = true;
+      selectedParqueadero = null;
+    });
+
+    final result = await ApiService.getParqueaderos();
+    if (result['success'] == true) {
+      setState(() {
+        parqueaderos = result['data'];
+        loading = false;
+      });
+    } else {
+      print("Error al cargar parqueaderos: ${result['message']}");
+      setState(() => loading = false);
+    }
+  }
+
+  void _selectParqueadero(Map<String, dynamic> parqueadero) async {
+    // Si hay una reserva activa, no permitir seleccionar otro parqueadero
+    if (reservaActiva != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tienes una reserva activa. Cancélala primero para reservar otro parqueadero.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      selectedParqueadero = parqueadero;
+      loadingTarifas = true;
+    });
+    _cardAnimationController.forward(from: 0.0);
+
+    final result = await ApiService.getTarifas(parqueadero['id']);
+    setState(() {
+      loadingTarifas = false;
+      if (result['success'] == true) {
+        tarifas = List<Map<String, dynamic>>.from(result['data']);
+      } else {
+        tarifas = [];
+      }
+    });
+  }
+
+  void _unselectParqueadero() {
+    _cardAnimationController.reverse().then((_) {
+      setState(() {
+        selectedParqueadero = null;
+        tarifas = [];
+      });
+    });
+  }
+
+  void _checkReservaActiva() async {
+    final result = await ApiService.getReservasUsuario(1); // TODO: Usar ID real del usuario
+    if (result['success'] == true && result['data'].isNotEmpty) {
+      // Buscar reservas activas (no canceladas ni completadas)
+      final reservasActivas = result['data'].where((reserva) =>
+        reserva['estado'] == 'activa' || reserva['estado'] == 'pendiente'
+      ).toList();
+
+      if (reservasActivas.isNotEmpty) {
+        final reserva = reservasActivas.first;
+        setState(() {
+          reservaActiva = reserva;
+        });
+
+        // Calcular tiempo restante basado en la hora de creación + 20 minutos
+        final fechaCreacion = DateTime.parse(reserva['fecha_creacion'] ?? reserva['fecha_reserva']);
+        final tiempoLimite = fechaCreacion.add(const Duration(minutes: 20));
+        final ahora = DateTime.now();
+
+        if (ahora.isBefore(tiempoLimite)) {
+          tiempoRestanteReserva = tiempoLimite.difference(ahora).inSeconds;
+          _startReservaCountdown();
+        } else {
+          // Si ya pasó el tiempo, cancelar automáticamente
+          _cancelarReservaActiva();
+        }
+      }
+    }
+  }
+
+  void _startReservaCountdown() {
+    if (reservaActiva == null) return;
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted && reservaActiva != null) {
+        setState(() {
+          tiempoRestanteReserva--;
+
+          // Alerta cuando quedan 5 minutos
+          if (tiempoRestanteReserva <= 300 && !mostrandoAlerta5Min) {
+            mostrandoAlerta5Min = true;
+            _show5MinAlert();
+          }
+
+          if (tiempoRestanteReserva > 0) {
+            _startReservaCountdown();
+          } else {
+            // Tiempo agotado - cancelar reserva
+            _cancelarReservaActiva();
+          }
+        });
+      }
+    });
+  }
+
+  void _show5MinAlert() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('¡Atención!'),
+          content: const Text('Te quedan 5 minutos para llegar a tu reserva.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Entendido'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelarReservaActiva() async {
+    if (reservaActiva != null) {
+      await ApiService.cancelarReserva(reservaActiva!['id']);
+      setState(() {
+        reservaActiva = null;
+        tiempoRestanteReserva = 0;
+        mostrandoAlerta5Min = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tiempo agotado - Reserva cancelada automáticamente'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+
+
+  String _formatTiempoRestante() {
+    int minutos = tiempoRestanteReserva ~/ 60;
+    int segundos = tiempoRestanteReserva % 60;
+    return '${minutos.toString().padLeft(2, '0')}:${segundos.toString().padLeft(2, '0')}';
+  }
+
+  void _cancelarReservaActivaManual() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirmar cancelación'),
+          content: const Text('¿Estás seguro de que quieres cancelar tu reserva?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Sí, cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmar == true) {
+      await _cancelarReservaActiva();
+    }
+  }
+
+  void _showReservationDialog() {
+    if (selectedParqueadero == null) return;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return ReservationDialog(
+          parqueadero: selectedParqueadero!,
+          tarifas: tarifas,
+          onReservar: _crearReserva,
+        );
+      },
+    );
+  }
+
+  Future<void> _crearReserva(Map<String, dynamic> reservaData) async {
+    final result = await ApiService.crearReserva(reservaData);
+    if (result['success'] == true) {
+      // Actualizar estado de reserva activa
+      setState(() {
+        reservaActiva = result['data'];
+        tiempoRestanteReserva = 900; // 15 minutos = 900 segundos
+        mostrandoAlerta5Min = false;
+      });
+      _startReservaCountdown();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reserva creada exitosamente'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.of(context).pop();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] ?? 'Error al crear reserva'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildParkingMarker(Map<String, dynamic> p, bool isSelected) {
+    final bool disponible = p['disponible'] == 1;
+    final Color markerColor =
+        disponible ? secondaryColor.withOpacity(0.9) : Colors.blueGrey.shade300;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isSelected ? primaryColor : markerColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 5,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Icon(
+        Icons.local_parking_rounded,
+        color: Colors.white,
+        size: isSelected ? 24 : 18,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Si hay reserva activa, mostrar pantalla dedicada a la reserva
+    if (reservaActiva != null) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        appBar: AppBar(
+          backgroundColor: primaryColor,
+          elevation: 0,
+          centerTitle: true,
+          title: const Text(
+            "Reserva Activa",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          actions: [
+            IconButton(
+              onPressed: widget.onLogout,
+              icon: const Icon(Icons.logout_rounded, color: Colors.white),
+              tooltip: "Cerrar sesión",
+            )
+          ],
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 15,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 64,
+                        color: tiempoRestanteReserva > 600 ? Colors.green : Colors.orange,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Parqueadero: ${reservaActiva!['parqueadero_nombre'] ?? 'N/A'}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Fecha: ${reservaActiva!['fecha_reserva']}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: textColor.withOpacity(0.8),
+                        ),
+                      ),
+                      Text(
+                        'Hora: ${reservaActiva!['hora_inicio']} - ${reservaActiva!['hora_fin']}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: textColor.withOpacity(0.8),
+                        ),
+                      ),
+                      Text(
+                        'Vehículo: ${reservaActiva!['tipo_vehiculo']}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: textColor.withOpacity(0.8),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: tiempoRestanteReserva > 600 ? Colors.green.shade100 : Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: tiempoRestanteReserva > 600 ? Colors.green : Colors.orange,
+                            width: 2,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.timer,
+                              color: tiempoRestanteReserva > 600 ? Colors.green : Colors.orange,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Tiempo restante: ${_formatTiempoRestante()}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: tiempoRestanteReserva > 600 ? Colors.green.shade800 : Colors.orange.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _cancelarReservaActivaManual,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          icon: const Icon(Icons.cancel),
+                          label: const Text(
+                            'Cancelar Reserva',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Pantalla normal del mapa cuando no hay reserva activa
+    final Widget loadingIndicator = Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: primaryColor),
+          const SizedBox(height: 10),
+          Text(
+            "Buscando parqueaderos...",
+            style: TextStyle(
+              fontSize: 16,
+              color: primaryColor.withOpacity(0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      appBar: AppBar(
+        backgroundColor: primaryColor,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          "Fast Parking",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.pushNamed(context, '/reservations'),
+            icon: const Icon(Icons.list_alt_rounded, color: Colors.white),
+            tooltip: "Mis Reservas",
+          ),
+          IconButton(
+            onPressed: widget.onLogout,
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+            tooltip: "Cerrar sesión",
+          )
+        ],
+      ),
+      body: Stack(
+        children: [
+          loading
+              ? loadingIndicator
+              : parqueaderos.isEmpty
+                  ? const Center(
+                      child: Text(
+                        "❌ No hay parqueaderos disponibles ❌",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 0),
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(30),
+                        ),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            center: latlong.LatLng(1.2136, -77.2811),
+                            zoom: 13.0,
+                            onTap: (_, __) {
+                              if (selectedParqueadero != null) {
+                                _unselectParqueadero();
+                              }
+                            },
+                            maxZoom: 18.0,
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate:
+                                  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                              subdomains: const ['a', 'b', 'c'],
+                              userAgentPackageName:
+                                  'com.parqueadero.usuarios',
+                            ),
+                            RichAttributionWidget(
+                              attributions: [
+                                TextSourceAttribution(
+                                  '© OpenStreetMap contributors',
+                                  onTap: () {},
+                                ),
+                              ],
+                            ),
+                            MarkerLayer(
+                              markers: parqueaderos.map((p) {
+                                final isSelected =
+                                    selectedParqueadero?['id'] == p['id'];
+                                return Marker(
+                                  point: latlong.LatLng(
+                                    double.tryParse(
+                                            p['latitud'].toString()) ??
+                                        0.0,
+                                    double.tryParse(
+                                            p['longitud'].toString()) ??
+                                        0.0,
+                                  ),
+                                  width: 45,
+                                  height: 45,
+                                  child: GestureDetector(
+                                    onTap: () => _selectParqueadero(p),
+                                    child: _buildParkingMarker(p, isSelected),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+          if (selectedParqueadero != null)
+            SlideTransition(
+              position: _cardOffsetAnimation,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: ParkingDetailCard(
+                    parqueadero: selectedParqueadero!,
+                    tarifas: tarifas,
+                    loadingTarifas: loadingTarifas,
+                    primaryColor: primaryColor,
+                    accentColor: accentColor,
+                    onClose: _unselectParqueadero,
+                    onReservar: _showReservationDialog,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: secondaryColor,
+        shape: const CircleBorder(),
+        onPressed: _loadParqueaderos,
+        child: const Icon(Icons.refresh, color: Colors.white),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------
+
+class ParkingDetailCard extends StatelessWidget {
+  final Map<String, dynamic> parqueadero;
+  final List<Map<String, dynamic>> tarifas;
+  final bool loadingTarifas;
+  final Color primaryColor;
+  final Color accentColor;
+  final VoidCallback onClose;
+  final VoidCallback onReservar;
+
+  const ParkingDetailCard({
+    super.key,
+    required this.parqueadero,
+    required this.tarifas,
+    required this.loadingTarifas,
+    required this.primaryColor,
+    required this.accentColor,
+    required this.onClose,
+    required this.onReservar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool disponible = parqueadero['disponible'] == 1;
+    final Color statusColor =
+        disponible ? accentColor : Colors.redAccent.shade400;
+    final String statusText = disponible ? "Disponible" : "Lleno";
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.local_parking_rounded,
+                  color: statusColor,
+                  size: 30,
+                ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      parqueadero['nombre'] ?? 'Parqueadero Desconocido',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        statusText,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              InkWell(
+                onTap: onClose,
+                customBorder: const CircleBorder(),
+                child: const Padding(
+                  padding: EdgeInsets.all(4.0),
+                  child:
+                      Icon(Icons.close_rounded, color: Colors.black54),
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 25, thickness: 1),
+          _buildDetailRow(
+            icon: Icons.map_outlined,
+            label: "Dirección",
+            value: parqueadero['direccion'] ?? 'N/A',
+            color: primaryColor,
+          ),
+          const SizedBox(height: 8),
+          _buildDetailRow(
+            icon: Icons.directions_car_filled_rounded,
+            label: "Cupos disponibles",
+            value: parqueadero['cupos']?.toString() ?? 'N/A',
+            color: primaryColor,
+          ),
+          const SizedBox(height: 12),
+          if (loadingTarifas)
+            const Center(child: CircularProgressIndicator())
+          else if (tarifas.isNotEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Tarifas por hora:",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...tarifas.map((tarifa) => _buildDetailRow(
+                      icon:
+                          _getVehicleIcon(tarifa['tipo_vehiculo']),
+                      label:
+                          tarifa['tipo_vehiculo'].toString().toUpperCase(),
+                      value:
+                          '\$${tarifa['tarifa_hora']} COP',
+                      color: accentColor,
+                    )),
+              ],
+            )
+          else
+            const Text(
+              "Tarifas no disponibles",
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onReservar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14),
+                elevation: 2,
+              ),
+              icon: const Icon(Icons.bookmark_add_rounded),
+              label: const Text(
+                "Reservar Cupo",
+                style: TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 10),
+        Text(
+          "$label: ",
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.black54,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData _getVehicleIcon(String tipoVehiculo) {
+    switch (tipoVehiculo.toLowerCase()) {
+      case 'carro':
+        return Icons.directions_car;
+      case 'moto':
+        return Icons.motorcycle;
+      case 'camion':
+        return Icons.local_shipping;
+      default:
+        return Icons.directions_car;
+    }
+  }
+}
+
+// ----------------------------------------------------------------------
+
+class ReservationDialog extends StatefulWidget {
+  final Map<String, dynamic> parqueadero;
+  final List<Map<String, dynamic>> tarifas;
+  final Function(Map<String, dynamic>) onReservar;
+
+  const ReservationDialog({
+    super.key,
+    required this.parqueadero,
+    required this.tarifas,
+    required this.onReservar,
+  });
+
+  @override
+  State<ReservationDialog> createState() => _ReservationDialogState();
+}
+
+class _ReservationDialogState extends State<ReservationDialog> {
+  String selectedVehicleType = 'carro';
+  String observations = '';
+  int countdownSeconds = 900; // 15 minutos
+  bool isCountingDown = false;
+  bool isReserved = false;
+  int? reservaId;
+
+  void _submitReservation() async {
+    if (isReserved) return;
+    final reservaData = {
+      'parqueadero_id': widget.parqueadero['id'],
+      'tipo_vehiculo': selectedVehicleType,
+      'observaciones': observations,
+    };
+    setState(() {
+      isReserved = true;
+    });
+    await widget.onReservar(reservaData);
+    // El cierre del diálogo lo maneja el padre tras reserva exitosa
+  }
+
+  String _formatCountdown() {
+    int minutes = countdownSeconds ~/ 60;
+    int seconds = countdownSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // No iniciar cuenta regresiva automáticamente
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: Colors.white, // Cambié _HomeScreenState.backgroundColor por un color directo
+      titleTextStyle: const TextStyle(
+        color: Colors.black, // Cambié _HomeScreenState.textColor
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+      ),
+      contentTextStyle: TextStyle(
+        color: Colors.black.withOpacity(0.8), // Cambié _HomeScreenState.textColor
+      ),
+      title: isReserved
+          ? Column(
+              children: [
+                const Text('Reserva Confirmada'),
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: countdownSeconds > 600 ? Colors.green.shade100 : Colors.orange.shade100,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: countdownSeconds > 600 ? Colors.green : Colors.orange,
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.timer,
+                        color: countdownSeconds > 600 ? Colors.green : Colors.orange,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatCountdown(),
+                        style: TextStyle(
+                          color: countdownSeconds > 600 ? Colors.green.shade800 : Colors.orange.shade800,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Text('Reservar en ${widget.parqueadero['nombre']}'),
+      content: isReserved
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Tu reserva en ${widget.parqueadero['nombre']} está confirmada',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Tienes ${countdownSeconds ~/ 60} minutos para llegar',
+                  style: TextStyle(
+                    color: countdownSeconds > 600 ? Colors.green.shade700 : Colors.orange.shade700,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            )
+          : SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: selectedVehicleType,
+                    decoration: const InputDecoration(labelText: 'Tipo de vehículo'),
+                    items: widget.tarifas.map((tarifa) {
+                      return DropdownMenuItem<String>(
+                        value: tarifa['tipo_vehiculo'],
+                        child: Text(tarifa['tipo_vehiculo'].toUpperCase()),
+                      );
+                    }).toList(),
+                    onChanged: (value) => setState(() => selectedVehicleType = value!),
+                  ),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Observaciones'),
+                    onChanged: (value) => observations = value,
+                  ),
+                ],
+              ),
+            ),
+      actions: isReserved
+          ? [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Entendido'),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: _submitReservation,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue, // Cambié _HomeScreenState.secondaryColor
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Reservar'),
+              ),
+            ],
+    );
+  }
+}

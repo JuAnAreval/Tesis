@@ -1,0 +1,69 @@
+/* login.css (¡Ahora mucho más limpio!) */
+
+/* ❌ ELIMINADO: :root, body, .login-container, .login-card, 
+   .title, .subtitle, .btn, .btn:hover, y todos los .snackbar */
+
+/* ✅ MANTENEMOS: Estilos específicos para el grupo con ícono */
+.input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-bottom: 1.2rem;
+}
+
+.icon {
+    position: absolute;
+    left: 14px;
+    color: #999;
+    font-size: 1.1rem;
+    z-index: 2;
+    /* Para que esté sobre el input */
+}
+
+/* 💡 MODIFICADO: 
+  Ahora solo "especializamos" la clase .input (que ya existe globalmente).
+  Solo le añadimos el padding para el ícono.
+*/
+.input-group .input {
+    padding-left: 2.8rem;
+}
+
+/* 💡 MODIFICADO: 
+  Añadimos padding-right al input de contraseña 
+  para que no se solape con el botón de "ojo".
+*/
+.input-group .input[type="password"],
+.input-group .input[type="text"] {
+    /* Asumiendo que el botón "toggle-pass" también necesita espacio */
+    padding-right: 2.8rem;
+}
+
+/* ✅ MANTENEMOS: El botón para mostrar/ocultar contraseña */
+.toggle-pass {
+    position: absolute;
+    right: 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #888;
+    font-size: 1.1rem;
+    z-index: 2;
+}
+
+/* ✅ MANTENEMOS: Los estilos para el texto de registro */
+.register-text {
+    margin-top: 1.5rem;
+    color: #555;
+    font-size: 0.95rem;
+}
+
+.link {
+    color: var(--primary-color);
+    /* Usamos la variable global */
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.link:hover {
+    text-decoration: underline;
+}

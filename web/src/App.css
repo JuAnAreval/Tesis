@@ -1,0 +1,260 @@
+/* App.css (Archivo Global Consolidado)
+  =====================================
+  Contiene:
+  1. Variables (Paleta de colores original)
+  2. Reseteo y Estilos Base (de index.css y styles.css)
+  3. Layouts (de App.css original)
+  4. Clases de Componentes/Utilidad (de styles.css, adaptadas a la paleta)
+*/
+
+/* 1. 🎨 Paleta y Variables */
+:root {
+  --primary-color: #6a5acd; /* Morado tipo Flutter */
+  --primary-dark: #4b3dbb;
+  --background: #f8f4ff;
+  --text-color: #333;
+  --border-color: #ddd;
+  --success: #4caf50;
+  --error: #e53935;
+  --white: #fff;
+  --shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+
+  /* Fuentes (de index.css) */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --------------------------------- */
+/* 2. Reseteo y Estilos Globales     */
+/* --------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  /* Usamos la fuente 'Poppins' del App.css original */
+  font-family: "Poppins", system-ui, sans-serif;
+  line-height: 1.6;
+  background-color: var(--background);
+  color: var(--text-color);
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* --------------------------------- */
+/* 3. Layouts (de App.css original)  */
+/* --------------------------------- */
+
+.auth-layout {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.main-layout {
+  /* ... (se mantiene como en el paso 1) ... */
+}
+
+.main-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* --------------------------------- */
+/* 4. Componentes y Utilidades       */
+/* (de styles.css, adaptadas)     */
+/* --------------------------------- */
+
+/* Utilidades de texto */
+.text-primary {
+  color: var(--primary-color);
+}
+
+/* Card */
+.card {
+  background-color: var(--white);
+  border-radius: 0.75rem; /* 12px */
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  border: 1px solid #e0d7ff; /* Borde sutil a juego */
+}
+
+/* Input */
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem; /* 8px */
+  font-size: 1rem;
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  /* Sombra de focus morada */
+  box-shadow: 0 0 0 3px rgba(106, 90, 205, 0.2); 
+}
+
+/* Botones */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem; /* 8px */
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+  color: var(--white);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-dark);
+}
+
+/* He convertido .btn-secondary en un estilo "secundario" coherente */
+.btn-secondary {
+  background-color: var(--background);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+}
+
+.btn-secondary:hover {
+  background-color: #e8e4ff; /* Un "hover" morado claro */
+}
+
+.btn-outline {
+  background-color: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+}
+
+.btn-outline:hover {
+  background-color: #f9fafb;
+}
+
+/* Alertas */
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+
+.alert-success {
+  background-color: #e8f5e9;
+  color: #1b5e20;
+  border-color: #c8e6c9;
+}
+
+.alert-error {
+  background-color: #ffebee;
+  color: #b71c1c;
+  border-color: #ffcdd2;
+}
+
+/* Mensajes (del App.css original) */
+.error-msg {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--error);
+}
+
+.success-msg {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--success);
+}
+
+/* Spinner */
+.spinner {
+  border: 3px solid #e8e4ff; /* Color base morado claro */
+  border-top: 3px solid var(--primary-color);
+  border-radius: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive (de styles.css) */
+@media (max-width: 640px) {
+  .card {
+    padding: 1rem;
+  }
+  .btn {
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+  }
+  .main-content {
+    padding: 1rem;
+  }
+}
+
+/* --------------------------------- */
+/* Estilos Específicos (Originales)  */
+/* --------------------------------- */
+
+/* Caja de login y registro */
+.auth-box {
+  background-color: var(--white);
+  padding: 2.5rem;
+  border-radius: 1.5rem;
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+/* (Aquí irían todos los sub-estilos de .auth-box que ya teníamos) */
+.auth-box:hover {
+  transform: translateY(-2px);
+}
+.auth-box h1, .auth-box h2 { /* ... */ }
+.auth-box p { /* ... */ }
+
+/* Mapa */
+.leaflet-container {
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+  border: 1px solid #e0d7ff;
+}
